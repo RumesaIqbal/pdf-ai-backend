@@ -303,8 +303,16 @@ ANSWER:"""
                 print(f"[DEBUG] Model {model_name} failed: {e}")
                 # Stop if quota/resource exhausted
                 if "RESOURCE_EXHAUSTED" in str(e):
-                    break
+                    
                 continue
+
+
+# If all models fail
+raise HTTPException(
+    status_code=500,
+    detail=f"All models failed to generate answer. Last error: {last_error}"
+)
+
 
         # -----------------------------
         # 5️⃣ If all models failed
