@@ -33,7 +33,7 @@ if not GENAI_API_KEY or not SUPABASE_URL or not SUPABASE_KEY:
 # -----------------------------
 # 2️⃣ Initialize clients
 # -----------------------------
-client = genai.Client(api_key=GENAI_API_KEY)
+client = genai.Client(api_key=os.getenv("GENAI_API_KEY"))
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
 
