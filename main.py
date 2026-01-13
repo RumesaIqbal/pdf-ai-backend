@@ -33,29 +33,21 @@ if not GENAI_API_KEY or not SUPABASE_URL or not SUPABASE_KEY:
 # -----------------------------
 # 2️⃣ Initialize clients
 # -----------------------------
-client = genai.Client(api_key= os.getenv("GENAI_API_KEY"))
+client = genai.Client(api_key=GENAI_API_KEY)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-embeddings = GoogleGenerativeAIEmbeddings(
-    model="models/text-embedding-004",
-    api_key=os.getenv("GENAI_API_KEY")
-)
+embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
 
 # -----------------------------
 # 3️⃣ FastAPI setup
 # -----------------------------
 app = FastAPI(title="PDF AI Query API", version="1.0.1")
 
-origins = [
-    "https://pdf-ai-frontend-six.vercel.app",  # your frontend URL
-    "http://localhost:3000",  # for local development
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,  # allow these origins
+    allow_origins=["https://pdf-ai-frontend-six.vercel.app","http://localhost:3000"],
     allow_credentials=True,
-    allow_methods=["*"],     # allow all HTTP methods (GET, POST, etc.)
-    allow_headers=["*"],     # allow all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # -----------------------------
@@ -208,7 +200,6 @@ async def upload_pdf(file: UploadFile = File(...), session_id: str = None):
 # -----------------------------
 # 9️⃣ Ask PDF question
 # -----------------------------
-
 @app.post("/ask")
 def ask_pdf(request: QueryRequest):
     if not request.session_id.strip():
@@ -217,38 +208,21 @@ def ask_pdf(request: QueryRequest):
         raise HTTPException(status_code=400, detail="Question cannot be empty")
 
     try:
-        # -----------------------------
-        # 1️⃣ Generate question embedding
-        # -----------------------------
-        try:
-            question_embedding = embeddings.embed_query(request.question)
-            print(f"[DEBUG] Question embedding generated, length: {len(question_embedding)}")
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to generate embedding: {e}")
+        question_embedding = embeddings.embed_query(request.question)
+        response = supabase.rpc("find_similar_chunks", {
+            "query_embedding": question_embedding,
+            "match_limit": 5,
+            "target_session": request.session_id
+        }).execute()
 
-        # -----------------------------
-        # 2️⃣ Fetch similar chunks from Supabase
-        # -----------------------------
-        try:
-            response = supabase.rpc("find_similar_chunks", {
-                "query_embedding": question_embedding,
-                "match_limit": request.match_count,
-                "target_session": request.session_id
-            }).execute()
-            if not response.data:
-                return {
-                    "question": request.question,
-                    "answer": "No relevant content found in your PDF.",
-                    "session_id": request.session_id,
-                    "status": "no_matches"
-                }
-            print(f"[DEBUG] Found {len(response.data)} similar chunks")
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Supabase RPC failed: {e}")
+        if not response.data:
+            return {
+                "question": request.question,
+                "answer": "No relevant content found in your PDF.",
+                "session_id": request.session_id,
+                "status": "no_matches"
+            }
 
-        # -----------------------------
-        # 3️⃣ Prepare prompt for Gemini
-        # -----------------------------
         context_chunks = [
             f"[Chunk {i+1}, Similarity: {r.get('similarity_score',0):.3f}]\n{r.get('chunk_content','')}"
             for i, r in enumerate(response.data)
@@ -269,28 +243,22 @@ INSTRUCTIONS:
 3. If answer not in PDF, say "The PDF does not contain information about this" politely.
 4. Clear, structured, plain text answer.
 5. Be concise but thorough and wellformatted like heading paragraph.
-6. Answer should be properly formatted into sentences, points, and paragraphs, not just plain text.
-7. Remove characters like *, # in the content.
+6. Answer should be properly frommatted into sentences points and paragraph not just plain text
+7. Remove  the characters like * , # in the content. 
+
 ANSWER:"""
 
-        # -----------------------------
-        # 4️⃣ Try generating answer with models
-        # -----------------------------
         model_priority = [
             "models/gemini-2.5-flash",
             "models/gemini-2.5-flash-lite",
             "models/gemini-2.5-flash-tts",
             "models/gemini-3-flash",
-            "models/gemini-2.0-flash",
         ]
-
-        last_error = None
         for model_name in model_priority:
             try:
                 answer = client.models.generate_content(model=model_name, contents=prompt)
                 response_text = getattr(answer, "text", "")
                 if response_text:
-                    print(f"[DEBUG] Answer generated with model: {model_name}")
                     return {
                         "question": request.question,
                         "answer": response_text.strip(),
@@ -299,37 +267,19 @@ ANSWER:"""
                         "status": "success"
                     }
             except Exception as e:
-                last_error = e
-                error_str = str(e)
-                print(f"[DEBUG] Model {model_name} failed: {error_str}")
-
-                # If quota exhausted, stop trying other models (likely share same quota)
-                if "RESOURCE_EXHAUSTED" in error_str:
-                    return {
-                        "question": request.question,
-                        "answer": "Sorry, the AI service quota has been exceeded. Please try again later.",
-                        "session_id": request.session_id,
-                        "model_used": model_name,
-                        "status": "quota_exceeded"
-                    }
-                # Otherwise, try next model
+                if "RESOURCE_EXHAUSTED" in str(e):
+                    break  # skip model
                 continue
 
-        # -----------------------------
-        # 5️⃣ If all models fail
-        # -----------------------------
         return {
             "question": request.question,
-            "answer": "Sorry, the AI could not generate an answer at this time.",
+            "answer": "I apologize, but I'm having trouble processing your request right now.",
             "session_id": request.session_id,
-            "status": "failed",
-            "error": str(last_error) if last_error else None
+            "status": "model_unavailable"
         }
 
-    except HTTPException:
-        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to process your question: {str(e)}")
 
 # -----------------------------
 # 🔟 End session
