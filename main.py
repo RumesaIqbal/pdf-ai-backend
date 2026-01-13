@@ -208,6 +208,7 @@ async def upload_pdf(file: UploadFile = File(...), session_id: str = None):
 # -----------------------------
 # 9️⃣ Ask PDF question
 # -----------------------------
+
 @app.post("/ask")
 def ask_pdf(request: QueryRequest):
     if not request.session_id.strip():
@@ -216,21 +217,38 @@ def ask_pdf(request: QueryRequest):
         raise HTTPException(status_code=400, detail="Question cannot be empty")
 
     try:
-        question_embedding = embeddings.embed_query(request.question)
-        response = supabase.rpc("find_similar_chunks", {
-            "query_embedding": question_embedding,
-            "match_limit": 5,
-            "target_session": request.session_id
-        }).execute()
+        # -----------------------------
+        # 1️⃣ Generate question embedding
+        # -----------------------------
+        try:
+            question_embedding = embeddings.embed_query(request.question)
+            print(f"[DEBUG] Question embedding generated, length: {len(question_embedding)}")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to generate embedding: {e}")
 
-        if not response.data:
-            return {
-                "question": request.question,
-                "answer": "No relevant content found in your PDF.",
-                "session_id": request.session_id,
-                "status": "no_matches"
-            }
+        # -----------------------------
+        # 2️⃣ Fetch similar chunks from Supabase
+        # -----------------------------
+        try:
+            response = supabase.rpc("find_similar_chunks", {
+                "query_embedding": question_embedding,
+                "match_limit": request.match_count,
+                "target_session": request.session_id
+            }).execute()
+            if not response.data:
+                return {
+                    "question": request.question,
+                    "answer": "No relevant content found in your PDF.",
+                    "session_id": request.session_id,
+                    "status": "no_matches"
+                }
+            print(f"[DEBUG] Found {len(response.data)} similar chunks")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Supabase RPC failed: {e}")
 
+        # -----------------------------
+        # 3️⃣ Prepare prompt for Gemini
+        # -----------------------------
         context_chunks = [
             f"[Chunk {i+1}, Similarity: {r.get('similarity_score',0):.3f}]\n{r.get('chunk_content','')}"
             for i, r in enumerate(response.data)
@@ -253,20 +271,26 @@ INSTRUCTIONS:
 5. Be concise but thorough and wellformatted like heading paragraph.
 6. Answer should be properly frommatted into sentences points and paragraph not just plain text
 7. Remove  the characters like * , # in the content. 
-
 ANSWER:"""
 
+        # -----------------------------
+        # 4️⃣ Try generating answer with models
+        # -----------------------------
         model_priority = [
             "models/gemini-2.5-flash",
             "models/gemini-2.5-flash-lite",
             "models/gemini-2.5-flash-tts",
             "models/gemini-3-flash",
+            "models/gemini-2.0-flash",
         ]
+
+        last_error = None
         for model_name in model_priority:
             try:
                 answer = client.models.generate_content(model=model_name, contents=prompt)
                 response_text = getattr(answer, "text", "")
                 if response_text:
+                    print(f"[DEBUG] Answer generated with model: {model_name}")
                     return {
                         "question": request.question,
                         "answer": response_text.strip(),
@@ -275,18 +299,25 @@ ANSWER:"""
                         "status": "success"
                     }
             except Exception as e:
+                last_error = e
+                print(f"[DEBUG] Model {model_name} failed: {e}")
+                # Stop if quota/resource exhausted
                 if "RESOURCE_EXHAUSTED" in str(e):
-                    break  # skip model
+                    break
                 continue
 
-        return {
-            "question": request.question,
-            "answer": "I apologize, but I'm having trouble processing your request right now.",
-            "session_id": request.session_id,
-            "status": "model_unavailable"
-        }
+        # -----------------------------
+        # 5️⃣ If all models failed
+        # -----------------------------
+        raise HTTPException(
+            status_code=500,
+            detail=f"All models failed to generate answer. Last error: {last_error}"
+        )
 
+    except HTTPException:
+        raise
     except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to process your question: {str(e)}")
 
 # -----------------------------
