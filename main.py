@@ -269,8 +269,8 @@ INSTRUCTIONS:
 3. If answer not in PDF, say "The PDF does not contain information about this" politely.
 4. Clear, structured, plain text answer.
 5. Be concise but thorough and wellformatted like heading paragraph.
-6. Answer should be properly frommatted into sentences points and paragraph not just plain text
-7. Remove  the characters like * , # in the content. 
+6. Answer should be properly formatted into sentences, points, and paragraphs, not just plain text.
+7. Remove characters like *, # in the content.
 ANSWER:"""
 
         # -----------------------------
@@ -300,33 +300,36 @@ ANSWER:"""
                     }
             except Exception as e:
                 last_error = e
-                print(f"[DEBUG] Model {model_name} failed: {e}")
-                # Stop if quota/resource exhausted
-                if "RESOURCE_EXHAUSTED" in str(e):
-                    
+                error_str = str(e)
+                print(f"[DEBUG] Model {model_name} failed: {error_str}")
+
+                # If quota exhausted, stop trying other models (likely share same quota)
+                if "RESOURCE_EXHAUSTED" in error_str:
+                    return {
+                        "question": request.question,
+                        "answer": "Sorry, the AI service quota has been exceeded. Please try again later.",
+                        "session_id": request.session_id,
+                        "model_used": model_name,
+                        "status": "quota_exceeded"
+                    }
+                # Otherwise, try next model
                 continue
 
-
-# If all models fail
-raise HTTPException(
-    status_code=500,
-    detail=f"All models failed to generate answer. Last error: {last_error}"
-)
-
-
         # -----------------------------
-        # 5️⃣ If all models failed
+        # 5️⃣ If all models fail
         # -----------------------------
-        raise HTTPException(
-            status_code=500,
-            detail=f"All models failed to generate answer. Last error: {last_error}"
-        )
+        return {
+            "question": request.question,
+            "answer": "Sorry, the AI could not generate an answer at this time.",
+            "session_id": request.session_id,
+            "status": "failed",
+            "error": str(last_error) if last_error else None
+        }
 
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to process your question: {str(e)}")
 
 # -----------------------------
 # 🔟 End session
