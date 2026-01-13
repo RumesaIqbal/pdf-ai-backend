@@ -42,12 +42,17 @@ embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
 # -----------------------------
 app = FastAPI(title="PDF AI Query API", version="1.0.1")
 
+origins = [
+    "https://pdf-ai-frontend-six.vercel.app",  # your frontend URL
+    "http://localhost:3000",  # for local development
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=origins,  # allow these origins
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],     # allow all HTTP methods (GET, POST, etc.)
+    allow_headers=["*"],     # allow all headers
 )
 
 # -----------------------------
