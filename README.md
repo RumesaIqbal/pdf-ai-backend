@@ -2,25 +2,7 @@ PDF Question Answering System – Backend
 
 This repository contains the backend implementation of a PDF-based Question Answering system built using Retrieval-Augmented Generation (RAG). The backend handles PDF ingestion, text chunking, embedding generation, vector storage, similarity search, and answer generation using a Large Language Model.
 
-🚀 Features
-
-Upload and process PDF documents
-
-Split documents into semantically meaningful chunks
-
-Generate vector embeddings using Gemini Embedding models
-
-Store and search embeddings using Supabase (pgvector)
-
-Retrieve relevant chunks via vector similarity search
-
-Generate context-aware answers using Gemini LLM
-
-Session-based querying
-
-Built with scalability and real-world constraints in mind
-
-🧠 Architecture Overview
+Architecture Overview
 
 PDF Upload → Extract text from PDF
 
@@ -42,7 +24,7 @@ Context + question passed to LLM
 
 Final answer generated
 
-🛠️ Tech Stack
+ Tech Stack
 
 Framework: FastAPI
 
